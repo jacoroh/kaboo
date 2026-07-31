@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+/*
+  Kaboo's design system — every colour and size the site uses lives here.
+  Change a value once and it updates everywhere, which is the whole point.
+*/
+@theme {
+  /* Brand: the felt table green and the gold accent */
+  --color-felt: #0b6b4f;
+  --color-felt-deep: #06503a;
+  --color-felt-edge: #043b2b;
+  --color-gold: #f4c542;
+
+  /* Text and surfaces for the website pages */
+  --color-ink: #16212b;
+  --color-muted: #5b6b78;
+  --color-surface: #f5f7f8;
+  --color-line: #e2e8ea;
+
+  /* Playing-card colours */
+  --color-card-red: #c0392b;
+  --color-card-black: #1c2833;
+  --color-card-face: #fdfefe;
+  --color-card-back: #8e2431;
+
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
+}
+
+body {
+  background: #ffffff;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
