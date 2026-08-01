@@ -17,6 +17,14 @@
   --color-surface: #f5f7f8;
   --color-line: #e2e8ea;
 
+  /* Table action buttons — each power has its own colour so the
+     table reads at a glance without needing to read the labels */
+  --color-power: #b7950b;
+  --color-kaboo: #922b21;
+  --color-match: #1f618d;
+  --color-match-on: #2e86c1;
+  --color-highlight: #5dade2;
+
   /* Playing-card colours */
   --color-card-red: #c0392b;
   --color-card-black: #1c2833;

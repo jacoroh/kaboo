@@ -57,7 +57,9 @@ export function buildDeck(): Card[] {
 
 // Fisher–Yates shuffle: walk the deck backwards and swap each card
 // with a random one before it. Every ordering is equally likely.
-export function shuffle(deck: Card[]): Card[] {
+// Generic (<T>) because shuffling doesn't care what's in the array —
+// we also use it on lists of slot numbers, e.g. the bot's opening peek.
+export function shuffle<T>(deck: T[]): T[] {
   const shuffled = [...deck];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
