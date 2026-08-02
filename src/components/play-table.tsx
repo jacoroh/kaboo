@@ -88,6 +88,11 @@ export default function PlayTable() {
   // Matching rule
   const [matchMode, setMatchMode] = useState(false);
   const [matchMessage, setMatchMessage] = useState<string | null>(null);
+  // Where play resumes once a gift has been handed over. Matching is
+  // legal OUTSIDE your own turn, so a match made during the bot's
+  // thinking pause has to give the bot its turn back — sending play to
+  // "draw" instead handed you a second turn and dropped the bot's.
+  const [giveReturnPhase, setGiveReturnPhase] = useState<Phase>("draw");
   // The bot's (fair, partial) knowledge
   const [botKnown, setBotKnown] = useState(botOpeningPeek);
   const [botPlayerKnown, setBotPlayerKnown] = useState([
@@ -278,6 +283,9 @@ export default function PlayTable() {
       `⚡ MATCH! The bot's ${card.rank}${card.suit} is gone — now give it one of yours.`,
     );
     setMatchMode(false);
+    // Match mode can only be armed during "draw" or "botTurn", and the
+    // gift must hand play back to whichever of the two it interrupted.
+    setGiveReturnPhase(phase === "botTurn" ? "botTurn" : "draw");
     setPhase("giveCard");
   }
 
@@ -296,7 +304,7 @@ export default function PlayTable() {
       `🎁 Card handed over — you have ${hand.length}, the bot has ${botHand.length}.`,
     );
     if (hand.length === 0) endPlayerTurn(hand, botHand);
-    else setPhase("draw");
+    else setPhase(giveReturnPhase);
   }
 
   // ----- draw phase -----
@@ -410,6 +418,7 @@ export default function PlayTable() {
     clearPowerSelections();
     setMatchMode(false);
     setMatchMessage(null);
+    setGiveReturnPhase("draw");
     setBotKnown(botOpeningPeek());
     setBotPlayerKnown([false, false, false, false]);
     setBotMessage(null);
