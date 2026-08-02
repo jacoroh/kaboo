@@ -15,7 +15,8 @@ import { botTakeTurn } from "@/game/bot";
 //   peekOther   — power (9/10): look at one bot card
 //   blindSwap   — power (J/Q): trade cards with the bot, unseen
 //   kingSwap    — power (K): pick your card + theirs...
-//   kingConfirm — ...both revealed to you: swap or keep?
+//   kingConfirm — ...both revealed to you, then the swap happens:
+//                 looking commits you to it (Jacob's ruling 2026-08-02)
 //   giveCard    — you matched a bot card: choose one of yours to give
 //   botTurn     — the bot is playing its turn
 //   roundOver   — Kaboo was called: all cards revealed, round scored
@@ -505,7 +506,8 @@ export default function PlayTable() {
       swapOwn === null
         ? "King: tap one of YOUR cards to offer"
         : "Now tap the BOT's card to look at",
-    kingConfirm: "Only you can see both cards. Swap them?",
+    kingConfirm:
+      "Only you can see both cards — and looking means you must swap.",
     giveCard: "🎁 Choose one of YOUR cards to give the bot (face-down)",
     botTurn: "🤖 The bot is thinking…",
     roundOver: resultLine,
@@ -740,19 +742,13 @@ export default function PlayTable() {
               </button>
             )}
 
+          {/* One button, not two: the King shows you both cards and the
+              swap then happens. The decision you get is whether to use
+              the power at all — "Skip power" above, before you look. */}
           {phase === "kingConfirm" && (
-            <>
-              <button
-                type="button"
-                className={BTN_POWER}
-                onClick={doKingSwap}
-              >
-                Swap them
-              </button>
-              <button type="button" className={BTN_BASE} onClick={endPower}>
-                Keep my card
-              </button>
-            </>
+            <button type="button" className={BTN_POWER} onClick={doKingSwap}>
+              Swap them
+            </button>
           )}
 
           {phase === "roundOver" && (
