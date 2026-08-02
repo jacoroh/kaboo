@@ -200,12 +200,15 @@ export default function PlayTable() {
 
   // ----- peek phase -----
 
-  function togglePeek(index: number) {
-    if (peeked.includes(index)) {
-      setPeeked(peeked.filter((i) => i !== index));
-    } else if (peeked.length < 2) {
-      setPeeked([...peeked, index]);
-    }
+  // You get exactly TWO looks at your own hand, and a look is spent the
+  // moment you take it — there is no putting a card back to win the look
+  // again. `peeked` therefore only ever grows: it is the record of what
+  // you have SEEN, not of what happens to be face-up right now. (Letting
+  // it shrink was a real bug: hide both cards and the counter fell back
+  // to 0/2, so you could go on to see all four before the round began.)
+  function peekCard(index: number) {
+    if (peeked.length >= 2 || peeked.includes(index)) return;
+    setPeeked([...peeked, index]);
   }
 
   function startTurns() {
@@ -419,17 +422,23 @@ export default function PlayTable() {
 
   function pressOwnCard(index: number) {
     if (matchMode) attemptMatch("you", index);
-    else if (phase === "peek") togglePeek(index);
+    else if (phase === "peek") peekCard(index);
     else if (phase === "decide") swapInto(index);
     else if (phase === "giveCard") giveCard(index);
-    else if (phase === "peekOwn") setRevealedOwn(index);
+    // A 7 or 8 buys ONE look at your own hand. Once it is taken, further
+    // taps do nothing — without this guard each tap simply moved the
+    // reveal to another card, so one power showed you your whole hand.
+    else if (phase === "peekOwn" && revealedOwn === null) setRevealedOwn(index);
     else if ((phase === "blindSwap" || phase === "kingSwap") && swapOwn === null)
       setSwapOwn(index);
   }
 
   function pressBotCard(index: number) {
     if (matchMode) attemptMatch("bot", index);
-    else if (phase === "peekOther") setRevealedOther(index);
+    // Same for a 9 or 10 and the bot's hand — and this is the worse leak
+    // of the two, since it exposed the opponent's entire hand for one card.
+    else if (phase === "peekOther" && revealedOther === null)
+      setRevealedOther(index);
     else if (phase === "blindSwap" && swapOwn !== null) doBlindSwap(index);
     else if (phase === "kingSwap" && swapOwn !== null) {
       setSwapOther(index);
@@ -471,7 +480,10 @@ export default function PlayTable() {
     : "";
 
   const statusText: Record<Phase, string> = {
-    peek: `Memorize 2 of your cards — tap to peek (${peeked.length}/2)`,
+    peek:
+      peeked.length < 2
+        ? `Tap 2 of your cards to peek — you only get two looks (${peeked.length}/2)`
+        : 'Memorize them, then tap "I\'ve memorized them"',
     draw:
       kabooCaller === "bot"
         ? "🚨 LAST TURN — the bot called Kaboo! Make it count"
@@ -518,7 +530,22 @@ export default function PlayTable() {
     (phase === "kingConfirm" && swapOther === i);
 
   const ownSelected = (i: number) =>
-    (phase === "blindSwap" || phase === "kingSwap") && swapOwn === i;
+    ((phase === "blindSwap" || phase === "kingSwap") && swapOwn === i) ||
+    (phase === "peek" && peeked.includes(i)) ||
+    (phase === "peekOwn" && revealedOwn === i);
+
+  // Every peek in this game comes with a fixed number of looks, and a
+  // look is spent the moment it is taken. Once the budget is gone that
+  // hand stops responding to taps entirely and the cards you did not
+  // choose dim, so there is no way to quietly buy a second look.
+  const ownPeekSpent =
+    (phase === "peek" && peeked.length >= 2) ||
+    (phase === "peekOwn" && revealedOwn !== null);
+  const botPeekSpent = phase === "peekOther" && revealedOther !== null;
+
+  // Which card that look was spent on (the one that stays lit).
+  const ownPeekChoice = (i: number) =>
+    phase === "peek" ? peeked.includes(i) : revealedOwn === i;
 
   // A card is wrapped in a coloured ring when it's selectable or selected.
   const ring = (selected: boolean, selectable: boolean) =>
@@ -553,11 +580,17 @@ export default function PlayTable() {
           </p>
           <div className="flex min-h-23 flex-wrap justify-center gap-2">
             {table.botHand.map((card, i) => (
-              <div key={i} className={ring(false, matchMode)}>
+              <div
+                key={i}
+                className={`${ring(
+                  phase === "peekOther" && revealedOther === i,
+                  matchMode,
+                )} ${botPeekSpent && revealedOther !== i ? "opacity-45" : ""}`}
+              >
                 <PlayingCard
                   card={card}
                   faceDown={!botFaceUp(i)}
-                  onClick={() => pressBotCard(i)}
+                  onClick={botPeekSpent ? undefined : () => pressBotCard(i)}
                 />
               </div>
             ))}
@@ -621,15 +654,15 @@ export default function PlayTable() {
             {table.hand.map((card, i) => (
               <div
                 key={i}
-                className={ring(
+                className={`${ring(
                   ownSelected(i),
                   matchMode || phase === "giveCard",
-                )}
+                )} ${ownPeekSpent && !ownPeekChoice(i) ? "opacity-45" : ""}`}
               >
                 <PlayingCard
                   card={card}
                   faceDown={!ownFaceUp(i)}
-                  onClick={() => pressOwnCard(i)}
+                  onClick={ownPeekSpent ? undefined : () => pressOwnCard(i)}
                 />
               </div>
             ))}
