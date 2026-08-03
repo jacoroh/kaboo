@@ -93,6 +93,12 @@ export default function PlayTable() {
   // Matching rule
   const [matchMode, setMatchMode] = useState(false);
   const [matchMessage, setMatchMessage] = useState<string | null>(null);
+  // The header's "⋯" menu. "Restart round" lives in here rather than on
+  // the table because it throws the round away, and it used to sit as a
+  // plain button directly under your hand — one mis-aimed tap from the
+  // cards you are asked to tap constantly. A menu costs two deliberate
+  // taps, which is the point.
+  const [menuOpen, setMenuOpen] = useState(false);
   // Where play resumes once a gift has been handed over. Matching is
   // legal OUTSIDE your own turn, so a match made during the bot's
   // thinking pause has to give the bot its turn back — sending play to
@@ -444,6 +450,7 @@ export default function PlayTable() {
     clearPowerSelections();
     setMatchMode(false);
     setMatchMessage(null);
+    setMenuOpen(false);
     setGiveReturnPhase("draw");
     setBotKnown(botOpeningPeek());
     setBotPlayerKnown([false, false, false, false]);
@@ -607,8 +614,58 @@ export default function PlayTable() {
               Match: You {scores.you} · Bot {scores.bot} (to 100)
             </p>
           </div>
-          <span className="w-12" />
+          {/* Round options. The container keeps its width whether or not
+              the button is showing, so the title stays centred. */}
+          <div className="relative w-12 text-right">
+            {!roundEnded && phase !== "botTurn" && (
+              <button
+                type="button"
+                aria-label="Round options"
+                aria-expanded={menuOpen}
+                className="rounded-full px-3 py-1 text-lg leading-none text-white/60 transition hover:bg-black/25 hover:text-white"
+                onClick={() => setMenuOpen(!menuOpen)}
+              >
+                ⋯
+              </button>
+            )}
+            {menuOpen && (
+              <>
+                {/* Tap anywhere else to dismiss. A button rather than a
+                    bare div so it is keyboard-reachable too. */}
+                <button
+                  type="button"
+                  aria-label="Close menu"
+                  className="fixed inset-0 z-10 cursor-default"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-9 z-20 w-40 overflow-hidden rounded-xl bg-felt-edge shadow-lg ring-1 ring-white/15">
+                  <button
+                    type="button"
+                    className="w-full px-4 py-3 text-left text-sm text-white/90 transition hover:bg-black/30"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      newRound(false);
+                    }}
+                  >
+                    Restart round
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </header>
+
+        {/* Calling Kaboo ends the round and cannot be taken back, so it
+            lives up here, far from the hand you spend the game tapping.
+            The row keeps its height even when empty — otherwise the whole
+            table would jump every time the button appeared. */}
+        <div className="flex min-h-11 w-full items-center justify-center">
+          {phase === "draw" && kabooCaller === null && !matchMode && (
+            <button type="button" className={BTN_KABOO} onClick={callKaboo}>
+              Call KABOO!
+            </button>
+          )}
+        </div>
 
         {/* The bot's hand */}
         <section className="flex flex-col items-center gap-2">
@@ -707,8 +764,12 @@ export default function PlayTable() {
           <p className="text-xs text-white/70">You · {table.hand.length} cards</p>
         </section>
 
-        {/* Phase-specific buttons */}
-        <div className="flex flex-wrap justify-center gap-3">
+        {/* Phase-specific buttons. Only reversible, in-turn actions live
+            here — ⚡ Match stays deliberately close to the cards, because
+            matching is a race and a far-away button would lose it for
+            you. Extra top padding puts a gap between the cards and the
+            row so an over-shot tap lands on nothing. */}
+        <div className="flex flex-wrap justify-center gap-3 pt-2">
           {phase === "peek" && (
             <button
               type="button"
@@ -727,12 +788,6 @@ export default function PlayTable() {
               onClick={() => setMatchMode(!matchMode)}
             >
               {matchMode ? "Cancel match" : `⚡ Match a ${discardTop.rank}`}
-            </button>
-          )}
-
-          {phase === "draw" && kabooCaller === null && !matchMode && (
-            <button type="button" className={BTN_KABOO} onClick={callKaboo}>
-              Call KABOO!
             </button>
           )}
 
@@ -802,15 +857,6 @@ export default function PlayTable() {
               onClick={() => newRound(true)}
             >
               New match
-            </button>
-          )}
-          {!roundEnded && phase !== "botTurn" && (
-            <button
-              type="button"
-              className={BTN_SECONDARY}
-              onClick={() => newRound(false)}
-            >
-              Restart round
             </button>
           )}
         </div>
