@@ -52,6 +52,11 @@ const BTN_KABOO = `${BTN} bg-kaboo border-2 border-gold hover:brightness-110`;
 const BTN_MATCH = `${BTN} bg-match hover:brightness-110`;
 const BTN_MATCH_ON = `${BTN} bg-match-on border-2 border-white`;
 
+// How long the bot "thinks" before its move lands. This is also your
+// window to slap a match out of turn, so it is a real game mechanic and
+// not just decoration.
+const BOT_THINKING_MS = 1400;
+
 const handValue = (hand: Card[]) =>
   hand.reduce((sum, card) => sum + cardValue(card), 0);
 
@@ -181,8 +186,17 @@ export default function PlayTable() {
     setBotKnown(turn.known);
     setBotPlayerKnown(turn.playerKnown);
     setBotMessage(turn.message);
-    setMatchMessage(null);
     setTurnNumber(turnNumber + 1);
+    // If you were still holding match mode open when the bot moved, you
+    // lost the race. Disarm it — the discard top has just changed, and a
+    // tap aimed at the old one would resolve against a card you never
+    // looked at — and say so, rather than silently dropping it.
+    if (matchMode) {
+      setMatchMode(false);
+      setMatchMessage("⏱️ Too slow — the bot moved before you tapped.");
+    } else {
+      setMatchMessage(null);
+    }
     if (turn.calledKaboo) {
       setKabooCaller("bot");
       setPhase("draw"); // your one last turn
@@ -193,16 +207,28 @@ export default function PlayTable() {
     }
   });
 
-  // Arm the bot's 1.4s "thinking" pause. This effect only watches the
-  // phase and match mode, so the timer is started ONCE when the bot's
-  // turn begins. With no dependency array at all it restarted on every
-  // single re-render, which meant any state change during the bot's turn
-  // silently pushed its move back another 1.4 seconds.
+  // Arm the bot's "thinking" pause. The effect watches the PHASE and
+  // nothing else, so the timer is armed once when the bot's turn begins
+  // and then left alone until that turn ends.
+  //
+  // `matchMode` used to be a guard and a dependency here, and that was the
+  // freeze bug: arming match mode cancelled the bot's timer outright, and
+  // cancelling match mode started a fresh full pause. You could hold the
+  // clock still for as long as you liked and study the table. Matching is
+  // a RACE — a clock the racer can stop is not a race — so match mode now
+  // re-renders the screen without touching the running timer, and the bot
+  // moves exactly when it said it would.
+  //
+  // The one interruption left is `giveCard`: winning a match against a bot
+  // card genuinely pauses play while you choose a card to hand back, and
+  // the phase change clears the timer. Returning to `botTurn` then costs
+  // the bot a fresh pause — bounded and self-limiting, since every such
+  // interruption spends one of your own cards.
   useEffect(() => {
-    if (phase !== "botTurn" || matchMode) return;
-    const timer = setTimeout(playBotTurn, 1400);
+    if (phase !== "botTurn") return;
+    const timer = setTimeout(playBotTurn, BOT_THINKING_MS);
     return () => clearTimeout(timer);
-  }, [phase, matchMode]);
+  }, [phase]);
 
   // ----- peek phase -----
 
