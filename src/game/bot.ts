@@ -108,6 +108,49 @@ function tryMatches(s: TableState, messages: string[]) {
   }
 }
 
+export type BotMatchInput = {
+  botHand: Card[];
+  playerHand: Card[];
+  discardPile: Card[];
+  known: boolean[];
+  playerKnown: boolean[];
+};
+
+export type BotMatchResult = BotMatchInput & {
+  matched: boolean;
+  message: string;
+};
+
+// The final-round match window: after the last turn and before the
+// reveal, the discard top stays matchable for a few seconds and BOTH
+// sides may slap. This is the same `tryMatches` the bot already runs
+// inside its own turn, exposed on its own so the table can fire it once,
+// on a delay, without handing the bot a whole extra turn.
+//
+// No draw pile is involved: the bot only ever slaps cards it KNOWS, so
+// it never guesses and never takes a penalty card.
+export function botSlapMatches(input: BotMatchInput): BotMatchResult {
+  const s: TableState = {
+    botHand: [...input.botHand],
+    playerHand: [...input.playerHand],
+    drawPile: [],
+    discardPile: [...input.discardPile],
+    known: [...input.known],
+    playerKnown: [...input.playerKnown],
+  };
+  const messages: string[] = [];
+  tryMatches(s, messages);
+  return {
+    botHand: s.botHand,
+    playerHand: s.playerHand,
+    discardPile: s.discardPile,
+    known: s.known,
+    playerKnown: s.playerKnown,
+    matched: messages.length > 0,
+    message: messages.join('\n'),
+  };
+}
+
 export function botTakeTurn(input: BotTurnInput): BotTurnResult {
   const s: TableState = {
     botHand: [...input.botHand],

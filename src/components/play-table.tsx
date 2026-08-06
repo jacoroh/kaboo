@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { PlayingCard } from "@/components/playing-card";
 import { buildDeck, Card, cardValue, powerOf, shuffle } from "@/game/deck";
-import { botTakeTurn } from "@/game/bot";
+import { botSlapMatches, botTakeTurn } from "@/game/bot";
 
 // Phases of the round. The screen renders differently in each one.
 //   peek        — start of round: memorize 2 of your 4 cards
@@ -19,6 +19,9 @@ import { botTakeTurn } from "@/game/bot";
 //                 looking commits you to it (Jacob's ruling 2026-08-02)
 //   giveCard    — you matched a bot card: choose one of yours to give
 //   botTurn     — the bot is playing its turn
+//   finalMatch  — the last turn is played but nothing is revealed yet:
+//                 a few counted-down seconds in which either side may
+//                 still slap the discard top (Jacob's rule, 2026-08-03)
 //   roundOver   — Kaboo was called: all cards revealed, round scored
 //   matchOver   — someone crossed 100 points: match decided
 type Phase =
@@ -32,6 +35,7 @@ type Phase =
   | "kingConfirm"
   | "giveCard"
   | "botTurn"
+  | "finalMatch"
   | "roundOver"
   | "matchOver";
 
@@ -56,6 +60,16 @@ const BTN_MATCH_ON = `${BTN} bg-match-on border-2 border-white`;
 // window to slap a match out of turn, so it is a real game mechanic and
 // not just decoration.
 const BOT_THINKING_MS = 1400;
+
+// The final-round match window. Without it the last discard is dead and
+// whoever called Kaboo has already stopped playing; with it the round
+// stays live to the final second.
+const FINAL_MATCH_SECONDS = 4;
+// How long the bot waits before slapping inside that window. Unlike its
+// in-turn matching — which resolves instantly and no human can beat —
+// this one is deliberately beatable: it is the first place the reaction
+// delay of Phase 1.5 actually exists.
+const BOT_FINAL_SLAP_MS = 2000;
 
 const handValue = (hand: Card[]) =>
   hand.reduce((sum, card) => sum + cardValue(card), 0);
@@ -104,6 +118,10 @@ export default function PlayTable() {
   // thinking pause has to give the bot its turn back — sending play to
   // "draw" instead handed you a second turn and dropped the bot's.
   const [giveReturnPhase, setGiveReturnPhase] = useState<Phase>("draw");
+  // The final-round window: seconds left on the clock, and whether the
+  // bot has already taken its one slap at it.
+  const [finalSecondsLeft, setFinalSecondsLeft] = useState(0);
+  const [botSlapped, setBotSlapped] = useState(false);
   // The bot's (fair, partial) knowledge
   const [botKnown, setBotKnown] = useState(botOpeningPeek);
   const [botPlayerKnown, setBotPlayerKnown] = useState([
@@ -149,14 +167,31 @@ export default function PlayTable() {
     );
   }
 
+  // ----- the final-round match window -----
+
+  // The last turn has been played, but nothing is revealed yet. Open the
+  // window instead of scoring: for a few counted-down seconds the discard
+  // top is still matchable by either side.
+  //
+  // Nothing about the scores is captured here. The hands are read fresh
+  // when the clock runs out, precisely because a slap inside the window
+  // is meant to change them.
+  function openFinalWindow(youHand: Card[]) {
+    setFinalSecondsLeft(FINAL_MATCH_SECONDS);
+    setBotSlapped(false);
+    // Slapping is the only legal move left, so match mode arms itself —
+    // in a four-second window an extra tap just to say "I want to try"
+    // is most of the window. The match button still turns it off for
+    // anyone who would rather not risk a mis-tap and a penalty card.
+    setMatchMode(youHand.length > 0);
+    setPhase("finalMatch");
+  }
+
   // A player turn is over: score if this was the last turn after the
   // bot's Kaboo, auto-Kaboo on an empty hand, else hand over to the bot.
-  function endPlayerTurn(
-    youHand: Card[] = table.hand,
-    botHand: Card[] = table.botHand,
-  ) {
+  function endPlayerTurn(youHand: Card[] = table.hand) {
     setMatchMode(false);
-    if (kabooCaller === "bot") scoreRound("bot", youHand, botHand);
+    if (kabooCaller === "bot") openFinalWindow(youHand);
     else if (youHand.length === 0 && kabooCaller === null) {
       setKabooCaller("you");
       setBotMessage(
@@ -207,7 +242,7 @@ export default function PlayTable() {
       setKabooCaller("bot");
       setPhase("draw"); // your one last turn
     } else if (kabooCaller === "you") {
-      scoreRound("you", turn.playerHand, turn.botHand);
+      openFinalWindow(turn.playerHand);
     } else {
       setPhase("draw");
     }
@@ -235,6 +270,62 @@ export default function PlayTable() {
     const timer = setTimeout(playBotTurn, BOT_THINKING_MS);
     return () => clearTimeout(timer);
   }, [phase]);
+
+  // ----- the final window's clock -----
+
+  // Scoring reads the hands as they stand when the clock hits zero, not
+  // as they were when the window opened — a slap inside the window is
+  // supposed to change the score.
+  const closeFinalWindow = useEffectEvent(() => {
+    if (!kabooCaller) return;
+    setMatchMode(false);
+    scoreRound(kabooCaller, table.hand, table.botHand);
+  });
+
+  // One tick per second, so the number on screen is the real clock and
+  // not a decoration running next to a separate timer.
+  //
+  // The countdown PAUSES while you are choosing a card to give the bot
+  // (`giveCard` is a different phase, so this effect tears down), and
+  // resumes on the second it stopped at rather than restarting — winning
+  // a match should not also buy you a fresh window.
+  useEffect(() => {
+    if (phase !== "finalMatch") return;
+    const timer = setTimeout(() => {
+      if (finalSecondsLeft <= 1) closeFinalWindow();
+      else setFinalSecondsLeft(finalSecondsLeft - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [phase, finalSecondsLeft]);
+
+  // The bot's one slap at the final window. It only ever slaps cards it
+  // knows, so it cannot guess wrong and cannot take a penalty here.
+  const botFinalSlap = useEffectEvent(() => {
+    setBotSlapped(true);
+    const slap = botSlapMatches({
+      botHand: table.botHand,
+      playerHand: table.hand,
+      discardPile: table.discardPile,
+      known: botKnown,
+      playerKnown: botPlayerKnown,
+    });
+    if (!slap.matched) return;
+    setTable({
+      ...table,
+      hand: slap.playerHand,
+      botHand: slap.botHand,
+      discardPile: slap.discardPile,
+    });
+    setBotKnown(slap.known);
+    setBotPlayerKnown(slap.playerKnown);
+    setBotMessage(slap.message);
+  });
+
+  useEffect(() => {
+    if (phase !== "finalMatch" || botSlapped) return;
+    const timer = setTimeout(botFinalSlap, BOT_FINAL_SLAP_MS);
+    return () => clearTimeout(timer);
+  }, [phase, botSlapped]);
 
   // ----- peek phase -----
 
@@ -300,7 +391,18 @@ export default function PlayTable() {
           : `⚡ MATCH! Your ${card.rank}${card.suit} is gone — down to ${hand.length} cards.`,
       );
       setMatchMode(false);
-      if (hand.length === 0) endPlayerTurn(hand, table.botHand);
+      // Emptying your hand normally auto-triggers Kaboo. Inside the final
+      // window it changes nothing extra — a 0-card hand already scores 0,
+      // and the round is already ending — so the clock just keeps running.
+      if (hand.length === 0 && phase !== "finalMatch") endPlayerTurn(hand);
+      return;
+    }
+
+    // You have nothing left to hand over, so matching a bot card cannot
+    // be paid for. Only reachable inside the final window, where it also
+    // gains you nothing: your hand is empty and already scores 0.
+    if (table.hand.length === 0) {
+      setMatchMessage("You have no cards left to give — leave the bot's alone.");
       return;
     }
 
@@ -315,9 +417,10 @@ export default function PlayTable() {
       `⚡ MATCH! The bot's ${card.rank}${card.suit} is gone — now give it one of yours.`,
     );
     setMatchMode(false);
-    // Match mode can only be armed during "draw" or "botTurn", and the
-    // gift must hand play back to whichever of the two it interrupted.
-    setGiveReturnPhase(phase === "botTurn" ? "botTurn" : "draw");
+    // Matching is legal outside your own turn, so the gift must hand play
+    // back to whatever it interrupted — your turn, the bot's thinking
+    // pause, or the final window with its clock still part-run.
+    setGiveReturnPhase(phase);
     setPhase("giveCard");
   }
 
@@ -335,8 +438,16 @@ export default function PlayTable() {
     setMatchMessage(
       `🎁 Card handed over — you have ${hand.length}, the bot has ${botHand.length}.`,
     );
-    if (hand.length === 0) endPlayerTurn(hand, botHand);
-    else setPhase(giveReturnPhase);
+    // Same rule as a self-match: giving your last card away inside the
+    // final window is not an auto-Kaboo, it is just a 0-card hand.
+    if (hand.length === 0 && giveReturnPhase !== "finalMatch")
+      endPlayerTurn(hand);
+    else {
+      // Back into the window with match mode still armed: the card you
+      // matched is the new discard top, and chaining off it is legal.
+      if (giveReturnPhase === "finalMatch") setMatchMode(hand.length > 0);
+      setPhase(giveReturnPhase);
+    }
   }
 
   // ----- draw phase -----
@@ -381,7 +492,7 @@ export default function PlayTable() {
     setBotPlayerKnown(playerKnown);
     setDrawn(null);
     setDrawnFrom(null);
-    endPlayerTurn(hand, table.botHand);
+    endPlayerTurn(hand);
   }
 
   function discardDrawn(usePower: boolean) {
@@ -422,7 +533,7 @@ export default function PlayTable() {
     setBotKnown(known);
     setBotPlayerKnown(playerKnown);
     clearPowerSelections();
-    endPlayerTurn(hand, botHand);
+    endPlayerTurn(hand);
   }
 
   function doKingSwap() {
@@ -438,7 +549,7 @@ export default function PlayTable() {
     setBotKnown(known);
     setBotPlayerKnown(playerKnown);
     clearPowerSelections();
-    endPlayerTurn(hand, botHand);
+    endPlayerTurn(hand);
   }
 
   function newRound(resetScores: boolean) {
@@ -452,6 +563,8 @@ export default function PlayTable() {
     setMatchMessage(null);
     setMenuOpen(false);
     setGiveReturnPhase("draw");
+    setFinalSecondsLeft(0);
+    setBotSlapped(false);
     setBotKnown(botOpeningPeek());
     setBotPlayerKnown([false, false, false, false]);
     setBotMessage(null);
@@ -493,7 +606,9 @@ export default function PlayTable() {
 
   const roundEnded = phase === "roundOver" || phase === "matchOver";
   const canMatch =
-    !roundEnded && (phase === "draw" || phase === "botTurn") && !!discardTop;
+    !roundEnded &&
+    (phase === "draw" || phase === "botTurn" || phase === "finalMatch") &&
+    !!discardTop;
 
   const resultLine = roundResult
     ? (() => {
@@ -552,6 +667,15 @@ export default function PlayTable() {
       "Only you can see both cards — and looking means you must swap.",
     giveCard: "🎁 Choose one of YOUR cards to give the bot (face-down)",
     botTurn: "🤖 The bot is thinking…",
+    // The countdown lives in the status line rather than beside the
+    // discard pile: it is the one thing you must not miss, and this line
+    // is where you are already looking to find out what you may do.
+    finalMatch:
+      table.hand.length === 0
+        ? `⏳ ${finalSecondsLeft} — last chance… you are out of cards`
+        : matchMode
+          ? `⏳ ${finalSecondsLeft} — LAST CHANCE: tap any card you think is a ${discardTop?.rank}`
+          : `⏳ ${finalSecondsLeft} — last chance to match the ${discardTop?.rank} before the reveal`,
     roundOver: resultLine,
     matchOver: `Match over! You ${scores.you} · Bot ${scores.bot} — ${
       scores.you < scores.bot
@@ -617,7 +741,9 @@ export default function PlayTable() {
           {/* Round options. The container keeps its width whether or not
               the button is showing, so the title stays centred. */}
           <div className="relative w-12 text-right">
-            {!roundEnded && phase !== "botTurn" && (
+            {/* Hidden during the bot's turn and the final window: both
+                are timed, and a menu is not worth a second of either. */}
+            {!roundEnded && phase !== "botTurn" && phase !== "finalMatch" && (
               <button
                 type="button"
                 aria-label="Round options"
@@ -735,8 +861,10 @@ export default function PlayTable() {
           {botMessage && !roundEnded && (
             <p className="text-sm text-white/90 italic">{botMessage}</p>
           )}
+          {/* The final window writes its own status line, because the
+              countdown has to stay visible even with match mode armed. */}
           <p className="text-[15px] font-semibold text-gold">
-            {matchMode
+            {matchMode && phase !== "finalMatch"
               ? `⚡ MATCH MODE — tap any card you think is a ${discardTop?.rank}`
               : statusText[phase]}
           </p>
