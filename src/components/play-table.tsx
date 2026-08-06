@@ -181,7 +181,7 @@ export default function PlayTable() {
     setBotSlapped(false);
     // Slapping is the only legal move left, so match mode arms itself —
     // in a four-second window an extra tap just to say "I want to try"
-    // is most of the window. The match button still turns it off for
+    // is most of the window. "Stop matching" still turns it off for
     // anyone who would rather not risk a mis-tap and a penalty card.
     setMatchMode(youHand.length > 0);
     setPhase("finalMatch");
@@ -862,10 +862,17 @@ export default function PlayTable() {
             <p className="text-sm text-white/90 italic">{botMessage}</p>
           )}
           {/* The final window writes its own status line, because the
-              countdown has to stay visible even with match mode armed. */}
+              countdown has to stay visible even with match mode armed.
+
+              "MATCHING", not "MATCH MODE", for the same reason the button
+              says "Stop matching": on this screen the NOUN "match" means
+              the game to 100 — the header uses it that way, and so does
+              "Match over!". The verb is the rule. Keeping the two parts
+              of speech apart means the words never have to be guessed at
+              from context. */}
           <p className="text-[15px] font-semibold text-gold">
             {matchMode && phase !== "finalMatch"
-              ? `⚡ MATCH MODE — tap any card you think is a ${discardTop?.rank}`
+              ? `⚡ MATCHING — tap any card you think is a ${discardTop?.rank}`
               : statusText[phase]}
           </p>
         </div>
@@ -909,13 +916,21 @@ export default function PlayTable() {
             </button>
           )}
 
+          {/* "Stop matching", not "Cancel match". This game already uses
+              the noun "match" for the whole game to 100 — the header says
+              so a few centimetres above — and "cancel" reads as calling
+              something off rather than lowering your hands. Both halves
+              were a problem in the final window, where a player who wants
+              to sit the four seconds out should not have to wonder
+              whether the button ends their game. The gerund keeps it a
+              verb, which the noun can never be. */}
           {canMatch && (
             <button
               type="button"
               className={matchMode ? BTN_MATCH_ON : BTN_MATCH}
               onClick={() => setMatchMode(!matchMode)}
             >
-              {matchMode ? "Cancel match" : `⚡ Match a ${discardTop.rank}`}
+              {matchMode ? "Stop matching" : `⚡ Match a ${discardTop.rank}`}
             </button>
           )}
 
